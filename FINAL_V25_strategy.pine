@@ -1,0 +1,69 @@
+//@version=6
+strategy("FINAL V25 Strategy", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=10)
+
+// ===== INPUTS =====
+atrLength = input.int(14)
+
+// ===== TIME FILTER =====
+noTradeZone =
+     (hour == 11) or
+     (hour == 12 and minute <= 30) or
+     (hour == 13) or
+     (hour == 14 and minute == 0)
+
+// ===== CORE =====
+atr = ta.atr(atrLength)
+atrAvg = ta.sma(atr, 20)
+ma = ta.sma(close, 20)
+vwap = ta.vwap(close)
+
+// ===== REGIME =====
+trendUp = close > ma and ma > ma[1] and atr > atrAvg
+trendDown = close < ma and ma < ma[1] and atr > atrAvg
+noTradeMarket = atr > atrAvg * 1.8
+
+// ===== VOLUME =====
+avgVol = ta.sma(volume, 20)
+volOk = volume > avgVol
+
+// ===== VWAP CHOP FILTER =====
+avoidChop = math.abs(close - vwap) < atr * 0.3
+
+// ===== MOMENTUM FILTER =====
+body = math.abs(close - open)
+candleRange = high - low
+strongCandle = body > candleRange * 0.5
+
+// ===== ENTRY LOGIC =====
+pullbackLong = close[1] < open[1]
+confirmLong = close > high[1]
+longEntry = not noTradeZone and not noTradeMarket and trendUp and pullbackLong and confirmLong and volOk and not avoidChop and strongCandle
+
+pullbackShort = close[1] > open[1]
+confirmShort = close < low[1]
+shortEntry = not noTradeZone and not noTradeMarket and trendDown and pullbackShort and confirmShort and volOk and not avoidChop and strongCandle
+
+// ===== EXECUTION =====
+if longEntry
+    strategy.entry("LONG", strategy.long)
+
+if shortEntry
+    strategy.entry("SHORT", strategy.short)
+
+// ===== EXIT =====
+if strategy.position_size > 0
+    strategy.exit("EXIT LONG", stop=low[1])
+
+if strategy.position_size < 0
+    strategy.exit("EXIT SHORT", stop=high[1])
+
+// ===== PLOTS =====
+maColor = trendUp ? #00bfa5 : trendDown ? #ef5350 : color.gray
+plot(ma, "SMA 20", color=maColor, linewidth=2)
+plot(vwap, "VWAP", color=color.new(#7e57c2, 60), linewidth=1)
+
+plotshape(longEntry, "CALL", shape.triangleup, location.belowbar, #00bfa5, size=size.small)
+plotshape(shortEntry, "PUT", shape.triangledown, location.abovebar, #ef5350, size=size.small)
+
+bgcolor(trendUp and not noTradeZone and not noTradeMarket ? color.new(#00bfa5, 95) : na)
+bgcolor(trendDown and not noTradeZone and not noTradeMarket ? color.new(#ef5350, 95) : na)

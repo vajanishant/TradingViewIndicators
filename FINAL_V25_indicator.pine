@@ -1,0 +1,170 @@
+//@version=6
+indicator("FINAL V25 Indicator", overlay=true, max_labels_count=500)
+
+// ===== INPUTS =====
+atrLength = input.int(14, "ATR Length")
+i_strikeRnd = input.int(50, "Strike Rounding")
+i_showDash = input.bool(true, "Show Dashboard")
+i_showLabels = input.bool(true, "Show Labels")
+
+// ===== TIME FILTER =====
+noTradeZone = (hour == 11) or (hour == 12 and minute <= 30) or (hour == 13) or (hour == 14 and minute == 0)
+
+// ===== CORE =====
+atr = ta.atr(atrLength)
+atrAvg = ta.sma(atr, 20)
+ma = ta.sma(close, 20)
+vwap = ta.vwap(close)
+
+// ===== REGIME =====
+trendUp = close > ma and ma > ma[1] and atr > atrAvg
+trendDown = close < ma and ma < ma[1] and atr > atrAvg
+noTradeMarket = atr > atrAvg * 1.8
+
+// ===== VOLUME =====
+avgVol = ta.sma(volume, 20)
+volOk = volume > avgVol
+
+// ===== VWAP CHOP FILTER =====
+avoidChop = math.abs(close - vwap) < atr * 0.3
+
+// ===== MOMENTUM FILTER =====
+body = math.abs(close - open)
+candleRange = high - low
+strongCandle = body > candleRange * 0.5
+
+// ===== ENTRY LOGIC =====
+pullbackLong = close[1] < open[1]
+confirmLong = close > high[1]
+longEntry = not noTradeZone and not noTradeMarket and trendUp and pullbackLong and confirmLong and volOk and not avoidChop and strongCandle
+
+pullbackShort = close[1] > open[1]
+confirmShort = close < low[1]
+shortEntry = not noTradeZone and not noTradeMarket and trendDown and pullbackShort and confirmShort and volOk and not avoidChop and strongCandle
+
+// ===== POSITION TRACKING =====
+var bool inLong = false
+var bool inShort = false
+var float entryPrice = 0.0
+var float stopLevel = 0.0
+
+if longEntry and not inLong and not inShort
+    inLong := true
+    entryPrice := close
+    stopLevel := low[1]
+
+if shortEntry and not inShort and not inLong
+    inShort := true
+    entryPrice := close
+    stopLevel := high[1]
+
+longExit = inLong and close <= stopLevel
+shortExit = inShort and close >= stopLevel
+
+if longExit
+    inLong := false
+
+if shortExit
+    inShort := false
+
+// ===== OPTIONS STRIKE =====
+atmStrike = math.round(close / i_strikeRnd) * i_strikeRnd
+
+// ===== PLOTS =====
+maColor = trendUp ? #00bfa5 : trendDown ? #ef5350 : color.gray
+plot(ma, "SMA 20", color=maColor, linewidth=2)
+plot(vwap, "VWAP", color=color.new(#7e57c2, 60), linewidth=1)
+
+bgcolor(trendUp and not noTradeZone and not noTradeMarket ? color.new(#00bfa5, 95) : na)
+bgcolor(trendDown and not noTradeZone and not noTradeMarket ? color.new(#ef5350, 95) : na)
+
+plotshape(longEntry, "CALL", shape.triangleup, location.belowbar, #00bfa5, size=size.normal, text="CALL")
+plotshape(shortEntry, "PUT", shape.triangledown, location.abovebar, #ef5350, size=size.normal, text="PUT")
+plotshape(longExit, "EXIT", shape.xcross, location.abovebar, #ef5350, size=size.small)
+plotshape(shortExit, "EXIT", shape.xcross, location.belowbar, #ef5350, size=size.small)
+
+plot(inLong or inShort ? stopLevel : na, "Stop", color=#ef5350, linewidth=2, style=plot.style_circles)
+
+// ===== LABELS =====
+if i_showLabels and longEntry
+    ltext = "CALL " + str.tostring(atmStrike) + " CE\nEntry: " + str.tostring(math.round(close)) + " | Stop: " + str.tostring(math.round(low[1]))
+    label.new(bar_index, low - atr, ltext, style=label.style_label_up, color=color.new(#00bfa5, 10), textcolor=color.white, size=size.small)
+
+if i_showLabels and shortEntry
+    ltext = "PUT " + str.tostring(atmStrike) + " PE\nEntry: " + str.tostring(math.round(close)) + " | Stop: " + str.tostring(math.round(high[1]))
+    label.new(bar_index, high + atr, ltext, style=label.style_label_down, color=color.new(#ef5350, 10), textcolor=color.white, size=size.small)
+
+if i_showLabels and longExit
+    pnl = close - entryPrice
+    ltext = "EXIT\nP&L: " + str.tostring(math.round(pnl)) + " pts"
+    lcolor = pnl > 0 ? color.new(#00bfa5, 20) : color.new(#ef5350, 20)
+    label.new(bar_index, high + atr * 0.5, ltext, style=label.style_label_down, color=lcolor, textcolor=color.white, size=size.tiny)
+
+if i_showLabels and shortExit
+    pnl = entryPrice - close
+    ltext = "EXIT\nP&L: " + str.tostring(math.round(pnl)) + " pts"
+    lcolor = pnl > 0 ? color.new(#00bfa5, 20) : color.new(#ef5350, 20)
+    label.new(bar_index, low - atr * 0.5, ltext, style=label.style_label_up, color=lcolor, textcolor=color.white, size=size.tiny)
+
+// ===== DASHBOARD =====
+if i_showDash
+    var table dash = table.new(position.top_right, 2, 14, bgcolor=color.new(color.black, 75), border_color=color.gray, border_width=1)
+
+    okCol = #00bfa5
+    noCol = #ef5350
+    warnCol = #ff9800
+    cellBg = color.new(color.black, 72)
+
+    table.cell(dash, 0, 0, "FINAL V25", bgcolor=color.gray, text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 0, "STATUS", bgcolor=color.gray, text_color=color.white, text_size=size.small)
+
+    table.cell(dash, 0, 1, "Target", bgcolor=cellBg, text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 1, "PF 2.733", bgcolor=cellBg, text_color=#7e57c2, text_size=size.small)
+
+    table.cell(dash, 0, 2, "No-Trade", bgcolor=cellBg, text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 2, noTradeZone ? "BLOCKED" : "OK", bgcolor=cellBg, text_color=noTradeZone ? warnCol : okCol, text_size=size.small)
+
+    table.cell(dash, 0, 3, "ATR", bgcolor=cellBg, text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 3, noTradeMarket ? "HIGH" : "OK", bgcolor=cellBg, text_color=noTradeMarket ? warnCol : okCol, text_size=size.small)
+
+    table.cell(dash, 0, 4, "Trend UP", bgcolor=cellBg, text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 4, trendUp ? "YES" : "NO", bgcolor=cellBg, text_color=trendUp ? okCol : noCol, text_size=size.small)
+
+    table.cell(dash, 0, 5, "Trend DOWN", bgcolor=cellBg, text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 5, trendDown ? "YES" : "NO", bgcolor=cellBg, text_color=trendDown ? okCol : noCol, text_size=size.small)
+
+    table.cell(dash, 0, 6, "Volume", bgcolor=cellBg, text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 6, volOk ? "OK" : "LOW", bgcolor=cellBg, text_color=volOk ? okCol : noCol, text_size=size.small)
+
+    table.cell(dash, 0, 7, "Chop", bgcolor=cellBg, text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 7, avoidChop ? "YES" : "NO", bgcolor=cellBg, text_color=avoidChop ? warnCol : okCol, text_size=size.small)
+
+    table.cell(dash, 0, 8, "Candle", bgcolor=cellBg, text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 8, strongCandle ? "STRONG" : "WEAK", bgcolor=cellBg, text_color=strongCandle ? okCol : noCol, text_size=size.small)
+
+    table.cell(dash, 0, 9, "Pullback L", bgcolor=cellBg, text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 9, pullbackLong ? "YES" : "NO", bgcolor=cellBg, text_color=pullbackLong ? okCol : color.gray, text_size=size.small)
+
+    table.cell(dash, 0, 10, "Confirm L", bgcolor=cellBg, text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 10, confirmLong ? "YES" : "NO", bgcolor=cellBg, text_color=confirmLong ? okCol : color.gray, text_size=size.small)
+
+    table.cell(dash, 0, 11, "Pullback S", bgcolor=cellBg, text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 11, pullbackShort ? "YES" : "NO", bgcolor=cellBg, text_color=pullbackShort ? okCol : color.gray, text_size=size.small)
+
+    table.cell(dash, 0, 12, "Confirm S", bgcolor=cellBg, text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 12, confirmShort ? "YES" : "NO", bgcolor=cellBg, text_color=confirmShort ? okCol : color.gray, text_size=size.small)
+
+    table.cell(dash, 0, 13, "Position", bgcolor=cellBg, text_color=color.silver, text_size=size.small)
+    posText = inLong ? "LONG" : inShort ? "SHORT" : "FLAT"
+    posColor = inLong ? okCol : inShort ? noCol : color.silver
+    table.cell(dash, 1, 13, posText, bgcolor=cellBg, text_color=posColor, text_size=size.small)
+
+// ===== ALERTS =====
+if longEntry
+    alert('{"signal":"CALL","strike":' + str.tostring(atmStrike) + '}', alert.freq_once_per_bar)
+
+if shortEntry
+    alert('{"signal":"PUT","strike":' + str.tostring(atmStrike) + '}', alert.freq_once_per_bar)
+
+if longExit or shortExit
+    alert('{"signal":"EXIT"}', alert.freq_once_per_bar)
